@@ -19,6 +19,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"github.com/spf13/viper"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -36,6 +38,8 @@ import (
 
 	topodatapb "vitess.io/vitess/go/vt/proto/topodata"
 	"vitess.io/vitess/go/vt/proto/vtrpc"
+
+	"vitess.io/vitess/go/cmd/vtgate/cli/plugin_loader"
 )
 
 var (
@@ -190,4 +194,37 @@ func init() {
 	Main.Flags().StringVar(&plannerName, "planner-version", plannerName, "Sets the default planner to use when the session has not changed it. Valid values are: Gen4, Gen4Greedy, Gen4Left2Right")
 
 	Main.MarkFlagRequired("tablet_types_to_wait")
+
+	authPluginConfig := viper.Sub("config.auth.plugins")
+	if authPluginConfig == nil {
+		fmt.Println("config.auth.plugins not found in the configuration file. No plugins to load.")
+	} else {
+		// Initialize the map to store plugin information
+		pluginInfoMap := make(map[string]plugin_loader.PluginInfo)
+
+		// Iterate over the keys in authPluginConfig
+		for key := range authPluginConfig.AllSettings() {
+			source := authPluginConfig.GetString(key + ".source")
+			version := authPluginConfig.GetString(key + ".version")
+
+			// Add the plugin information to the map
+			pluginInfoMap[key] = plugin_loader.PluginInfo{
+				Source:  source,
+				Version: version,
+			}
+		}
+
+		// Create the pluginConfig using the populated map
+		pluginConfig := plugin_loader.PluginConfig{
+			Type:    "auth",
+			Plugins: pluginInfoMap,
+		}
+
+		// Load plugins only if there are entries in the config.auth.plugins section
+		if len(pluginInfoMap) > 0 {
+			if err := plugin_loader.LoadPlugins(pluginConfig); err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "Error loading plugins: %v\n", err)
+			}
+		}
+	}
 }
